@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Comment History</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+      crossorigin="anonymous"
+    />
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+      crossorigin="anonymous"
+    ></script>
+    <style>
+      body {
+        padding: 10px;
+      }
+
+      #header {
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 id="header">Comment History</h1>
+    <form id="commandForm">
+      <div class="input-group mb-3">
+        <label for="commandInput" class="input-group-text" id="basic-addon1"
+          >User</label
+        >
+        <input
+          type="text"
+          class="form-control"
+          placeholder="Enter Geometry Dash username"
+          aria-label="Command"
+          id="commandInput"
+          name="commandInput"
+          aria-describedby="basic-addon1"
+        />
+        <button
+          type="button"
+          class="btn btn-primary"
+          onclick="commentHistory()"
+        >
+          Submit
+        </button>
+      </div>
+    </form>
+
+    <div id="resultContainer" class="d-grid gap-2"></div>
+    <pre id="output"></pre>
+
+    <script>
+      async function runCommand(command) {
+        try {
+          const response = await fetch("/execute", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ command: command }),
+          });
+
+          if (!response.ok) {
+            throw new Error("Network response was not ok");
+          }
+
+          return await response.text();
+        } catch (error) {
+          console.error("Error fetching data:", error);
+          return null;
+        }
+      }
+
+      function generateCard(title, text, id) {
+        const divCard = document.createElement("div");
+        divCard.classList.add("card", "card-body", "mb-3");
+        divCard.style.width = "100%";
+
+        const cardTitle = document.createElement("h5");
+        cardTitle.classList.add("card-title");
+        cardTitle.textContent = title;
+
+        const cardText = document.createElement("p");
+        cardText.classList.add("card-text");
+        cardText.innerHTML = text;
+
+        const link = document.createElement("a");
+        link.classList.add("btn", "btn-primary");
+        link.href = "https://gdbrowser.com/comments/" + id;
+        link.target = "_blank"; // Open link in a new tab
+        link.textContent = "Open level's comments";
+
+        divCard.appendChild(cardTitle);
+        divCard.appendChild(cardText);
+        divCard.appendChild(link);
+
+        const resultContainer = document.getElementById("resultContainer");
+        resultContainer.appendChild(divCard);
+      }
+
+      function decodeBase64UrlSafe(commentBase64) {
+        const base64 = commentBase64.replace(/-/g, "+").replace(/_/g, "/");
+        const decodedString = atob(base64);
+        return decodedString;
+      }
+
+      async function commentHistory() {
+        document.getElementById("output").innerText = "";
+        var page = 1;
+        try {
+          const user = document.getElementById("commandInput").value;
+
+          const profileResponse = await runCommand(
+            "curl https://gdbrowser.com/api/profile/" + user
+          );
+          if (!profileResponse || profileResponse === "-1") {
+            document.getElementById("output").innerText = "User not found";
+            return;
+          }
+
+          const parsedProfile = JSON.parse(profileResponse);
+          const accID = parsedProfile.playerID;
+
+          let hasMorePages = true;
+
+          while (hasMorePages) {
+            const commentHistoryResponse = await runCommand(
+              'curl -X POST "http://www.boomlings.com/database/getGJCommentHistory.php" -H "User-Agent: " -d "userID=' +
+                accID +
+                "&page=" +
+                page +
+                '&secret=Wmfd2893gb7"'
+            );
+
+            if (!commentHistoryResponse || commentHistoryResponse == "-1") {
+              if (page === 1) {
+                document.getElementById("output").innerText =
+                  "Failed to fetch comment history";
+              }
+              return;
+            }
+
+            const commentEntries = commentHistoryResponse.split("|");
+
+            for (let entry of commentEntries) {
+              const parts = entry.split("~");
+
+              const comment = {};
+              for (let i = 0; i < parts.length; i += 2) {
+                const key = parts[i];
+                const value = parts[i + 1];
+                comment[key] = value;
+              }
+
+              if (comment["1"] === "-1" && page > 1) {
+                hasMorePages = false;
+                break;
+              }
+
+              const lvlNameResponse = await runCommand(
+                "curl https://gdbrowser.com/api/level/" + comment["1"]
+              );
+              const parsedLevel = JSON.parse(lvlNameResponse);
+
+              let likeText = "";
+              if (comment["4"].toString() == "1") {
+                likeText = " like<br>";
+              } else {
+                likeText = " likes<br>";
+              }
+              const cardText =
+                comment["4"] +
+                likeText +
+                "Level Name: " +
+                parsedLevel.name +
+                "<br>Level ID: " +
+                comment["1"];
+
+              generateCard(
+                decodeBase64UrlSafe(comment["2"]),
+                cardText,
+                comment["1"]
+              );
+            }
+
+            page++;
+          }
+        } catch (error) {
+          if (page != 1) {
+            console.error("Error processing comment history:", error);
+            document.getElementById("output").innerText =
+              "Error processing comment history";
+          }
+        }
+      }
+    </script>
+  </body>
+</html>
